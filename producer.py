@@ -1,5 +1,6 @@
 import pandas as pd
 import json
+import time
 from kafka import KafkaProducer 
 
 
@@ -13,8 +14,8 @@ data = pd.read_csv(data_file)
 
 for i, row in data.iterrows():
     records = row.to_dict()
-    producer.send("input_topic", value=json.dumps(records).encode("utf-8")) 
-    
+    producer.send("test1", value=json.dumps(records).encode("utf-8")) 
+    time.sleep(0.5)
 
 
 producer.flush()

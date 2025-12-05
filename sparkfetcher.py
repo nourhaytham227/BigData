@@ -7,8 +7,7 @@ spark = SparkSession.builder \
     .appName("KafkaToDB") \
     .getOrCreate()
 
-spark.sparkContext.setLogLevel('WARN')
-
+spark.sparkContext.setLogLevel('ERROR')
 
 
 schema = StructType() \
@@ -21,58 +20,69 @@ schema = StructType() \
     .add("Metascore", IntegerType()) \
     .add("Revenue", IntegerType())
 
-
-
+#reading from kafka
 df = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:9092") \
-    .option("subscribe", "output_topic") \
+    .option("startingOffsets", "earliest") \
+    .option("subscribe", "test2") \
     .load() \
     .select(from_json(col("value").cast("string"), schema).alias("data")) \
-    .select("data.*")
+    .select("data.*")\
+
 
 
 def write_to_oracle(batch_df, batch_id):
-
+    #Analysis
     df = batch_df \
-        .withColumn("Name_Length", length(col("Name"))) \
-        .withColumn("Rating_Rounded", round(col("Rating"), 0))
-
-
+        .withColumn("NAME_LENGTH", length(col("Name"))) \
+        .withColumn("RATING_ROUNDED", round(col("Rating"), 0))  
+    #write to db
     df.write \
         .format("jdbc") \
-        .option("driver", "oracle.jdbc.driver.OracleDriver") \
         .option("url", "jdbc:oracle:thin:@//localhost:1521/free") \
-        .option("dbtable", "MOVIES") \
+        .option("driver", "oracle.jdbc.driver.OracleDriver") \
         .option("user", "nouri") \
         .option("password", "123") \
+        .option("dbtable", "MOVIES") \
         .mode("append") \
         .save()
 
-    agg_df = df.groupBy("Genre").agg(
-    count("*").alias("movie_count"),
-    round(avg("Rating"), 1).alias("avg_rating"),
-    sum("Revenue").alias("total_revenue")
+    print("wrote " + str(df.count()) + " rows to MOVIES.")
+
+
+movies_query = df.writeStream \
+    .outputMode("append") \
+    .foreachBatch(write_to_oracle) \
+    .start()
+
+
+#aggregation analysis
+agg = df.groupBy("Genre").agg(
+    count("*").alias("MOVIE_COUNT"),
+    round(avg("Rating"), 1).alias("AVG_RATING"),
+    sum("Revenue").alias("TOTAL_REVENUE")
 )
 
 
-    agg_df.write \
+def write_stats_to_oracle(batch_df, batch_id):
+
+    batch_df.write \
         .format("jdbc") \
-        .option("driver", "oracle.jdbc.driver.OracleDriver") \
         .option("url", "jdbc:oracle:thin:@//localhost:1521/free") \
-        .option("dbtable", "MOVIE_STATS") \
+        .option("driver", "oracle.jdbc.driver.OracleDriver") \
         .option("user", "nouri") \
         .option("password", "123") \
-        .mode("append") \
+        .option("dbtable", "MOVIE_STATS") \
+        .mode("overwrite") \
         .save()
+    print("wrote " + str(batch_df.count()) + " rows to MOVIE_STATS.")
 
 
-
-oracle_query = df.writeStream \
-    .outputMode("append") \
-    .trigger(processingTime="1 second") \
-    .foreachBatch(write_to_oracle) \
-    .option("checkpointLocation", "C:/tmp/checkpoints/oracle_movie_sink") \
+stats_query = agg.writeStream \
+    .outputMode("complete") \
+    .foreachBatch(write_stats_to_oracle) \
     .start()
 
-oracle_query.awaitTermination()
+movies_query.awaitTermination()
+stats_query.awaitTermination()
