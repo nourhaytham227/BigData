@@ -28,17 +28,25 @@ df = spark.readStream \
     .option("subscribe", "test2") \
     .load() \
     .select(from_json(col("value").cast("string"), schema).alias("data")) \
-    .select("data.*")\
+    .select("data.*")
+        
+df_analysis = df \
+    .withColumn("REVENUE_MILLIONS",round(col("Revenue") / 1000000.0, 2)) \
+    .withColumn("RATING_ROUNDED", round(col("Rating"), 0))\
+    .select("ID", "Name", "REVENUE_MILLIONS", "RATING_ROUNDED")
+
+#aggregation analysis
+agg = df.groupBy("Genre").agg(
+    count("*").alias("MOVIE_COUNT"),
+    round(avg("Rating"), 1).alias("AVG_RATING"),
+    sum("Revenue").alias("TOTAL_REVENUE")
+)
 
 
 
 def write_to_oracle(batch_df, batch_id):
-    #Analysis
-    df = batch_df \
-        .withColumn("NAME_LENGTH", length(col("Name"))) \
-        .withColumn("RATING_ROUNDED", round(col("Rating"), 0))  
     #write to db
-    df.write \
+    batch_df.write \
         .format("jdbc") \
         .option("url", "jdbc:oracle:thin:@//localhost:1521/free") \
         .option("driver", "oracle.jdbc.driver.OracleDriver") \
@@ -48,21 +56,22 @@ def write_to_oracle(batch_df, batch_id):
         .mode("append") \
         .save()
 
-    print("wrote " + str(df.count()) + " rows to MOVIES.")
+    print("wrote " + str(batch_df.count()) + " rows to MOVIES.")
 
 
-movies_query = df.writeStream \
-    .outputMode("append") \
-    .foreachBatch(write_to_oracle) \
-    .start()
+def write_to_analysis_oracle(batch_df, batch_id):
+    #write to db
+    batch_df.write \
+        .format("jdbc") \
+        .option("url", "jdbc:oracle:thin:@//localhost:1521/free") \
+        .option("driver", "oracle.jdbc.driver.OracleDriver") \
+        .option("user", "nouri") \
+        .option("password", "123") \
+        .option("dbtable", "MOVIES_ANALYSIS") \
+        .mode("append") \
+        .save()
 
-
-#aggregation analysis
-agg = df.groupBy("Genre").agg(
-    count("*").alias("MOVIE_COUNT"),
-    round(avg("Rating"), 1).alias("AVG_RATING"),
-    sum("Revenue").alias("TOTAL_REVENUE")
-)
+    print("wrote " + str(batch_df.count()) + " rows to MOVIES_ANALYSIS.")
 
 
 def write_stats_to_oracle(batch_df, batch_id):
@@ -78,11 +87,24 @@ def write_stats_to_oracle(batch_df, batch_id):
         .save()
     print("wrote " + str(batch_df.count()) + " rows to MOVIE_STATS.")
 
+movies_query = df.writeStream \
+    .outputMode("append") \
+    .foreachBatch(write_to_oracle) \
+    .start()
 
+movie_analysis_query = df_analysis.writeStream \
+    .outputMode("append") \
+    .foreachBatch(write_to_analysis_oracle) \
+    .start()
+    
 stats_query = agg.writeStream \
     .outputMode("complete") \
     .foreachBatch(write_stats_to_oracle) \
     .start()
 
+
+
+
 movies_query.awaitTermination()
+movie_analysis_query.awaitTermination()
 stats_query.awaitTermination()

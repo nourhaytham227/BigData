@@ -1,0 +1,13 @@
+Big Data Commands
+
+to start zookeeper and kafka
+    
+zookeeper-server-start.bat config\zookeeper.properties
+kafka-server-start.bat config\server.properties
+
+to start spark:
+
+spark-submit^
+ --packages org.apache.spark:spark-sql-kafka-0-10_2.13:3.5.7,org.apache.spark:spark-streaming-kafka-0-10_2.13:3.5.7,^
+ --jars C:\Project\jars\ojdbc11.jar^
+  C:\Project\sparkfetcher.py 
